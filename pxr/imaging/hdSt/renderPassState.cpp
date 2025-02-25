@@ -1,25 +1,8 @@
 //
 // Copyright 2016 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 #include "pxr/imaging/garch/glApi.h"
 
@@ -53,7 +36,7 @@
 #include "pxr/base/tf/stringUtils.h"
 #include "pxr/base/vt/array.h"
 
-#include <boost/functional/hash.hpp>
+#include "pxr/base/tf/hash.h"
 
 PXR_NAMESPACE_OPEN_SCOPE
 
@@ -359,7 +342,8 @@ HdStRenderPassState::Prepare(
         // allocate interleaved buffer
         _renderPassStateBar = 
             hdStResourceRegistry->AllocateUniformBufferArrayRange(
-                HdTokens->drawingShader, bufferSpecs, HdBufferArrayUsageHint());
+                HdTokens->drawingShader, bufferSpecs,
+                HdBufferArrayUsageHintBitsUniform);
 
         HdStBufferArrayRangeSharedPtr _renderPassStateBar_ =
             std::static_pointer_cast<HdStBufferArrayRange> (_renderPassStateBar);
@@ -506,11 +490,11 @@ HdStRenderPassState::SetLightingShader(HdStLightingShaderSharedPtr const &lighti
 }
 
 void 
-HdStRenderPassState::SetRenderPassShader(HdStRenderPassShaderSharedPtr const &renderPassShader)
+HdStRenderPassState::SetRenderPassShader(
+    HdStRenderPassShaderSharedPtr const &renderPassShader)
 {
     _renderPassShader = renderPassShader;
     if (_renderPassStateBar) {
-
         HdStBufferArrayRangeSharedPtr _renderPassStateBar_ =
             std::static_pointer_cast<HdStBufferArrayRange> (_renderPassStateBar);
 
@@ -829,17 +813,19 @@ HdStRenderPassState::GetShaderHash() const
 {
     size_t hash = 0;
     if (_lightingShader) {
-        boost::hash_combine(hash, _lightingShader->ComputeHash());
+        hash = TfHash::Combine(hash, _lightingShader->ComputeHash());
     }
     if (_renderPassShader) {
-        boost::hash_combine(hash, _renderPassShader->ComputeHash());
+        hash = TfHash::Combine(hash, _renderPassShader->ComputeHash());
     }
 
     // See note earlier about avoiding shader variants when 0-4 clip planes are
     // used.
-    boost::hash_combine(hash, _clipPlanesBufferSize);
-    boost::hash_combine(hash, _UseAlphaMask());
-    return hash;
+    return TfHash::Combine(
+        hash,
+        _clipPlanesBufferSize,
+        _UseAlphaMask()
+    );
 }
 
 static
@@ -868,6 +854,10 @@ GfVec4f _ToVec4f(const VtValue &v)
     }
     if (v.IsHolding<double>()) {
         const double val = v.UncheckedGet<double>();
+        return GfVec4f(val);
+    }
+    if (v.IsHolding<int>()) {
+        const double val = v.UncheckedGet<int>();
         return GfVec4f(val);
     }
     if (v.IsHolding<GfVec2f>()) {
@@ -1099,7 +1089,8 @@ HdStRenderPassState::_InitPrimitiveState(
 
 void
 HdStRenderPassState::_InitAttachmentState(
-    HgiGraphicsPipelineDesc * pipeDesc) const
+    HgiGraphicsPipelineDesc * pipeDesc,
+    bool firstDrawBatch) const
 {
     // For Metal and Vulkan, we have to pass the color and depth descriptors 
     // down so that they are available when creating the Render Pipeline State
@@ -1111,6 +1102,13 @@ HdStRenderPassState::_InitAttachmentState(
         HgiAttachmentDesc attachment;
         _InitAttachmentDesc(
             attachment, binding, binding.renderBuffer, aovIndex);
+
+        // For HgiVulkan, don't want to run a clear operation unless this is 
+        // the first draw batch in a graphics cmds submission.
+        if (!firstDrawBatch) {
+            attachment.loadOp = HgiAttachmentLoadOpLoad;
+            attachment.clearValue = GfVec4f(0);
+        }
 
         if (HdAovHasDepthSemantic(binding.aovName) ||
             HdAovHasDepthStencilSemantic(binding.aovName)) {
@@ -1222,18 +1220,20 @@ HdStRenderPassState::_InitRasterizationState(
 void
 HdStRenderPassState::InitGraphicsPipelineDesc(
     HgiGraphicsPipelineDesc * pipeDesc,
-    HdSt_GeometricShaderSharedPtr const & geometricShader) const
+    HdSt_GeometricShaderSharedPtr const & geometricShader,
+    bool firstDrawBatch) const
 {
     _InitPrimitiveState(pipeDesc, geometricShader);
     _InitDepthStencilState(&pipeDesc->depthState);
     _InitMultiSampleState(&pipeDesc->multiSampleState);
     _InitRasterizationState(&pipeDesc->rasterizationState, geometricShader);
-    _InitAttachmentState(pipeDesc);
+    _InitAttachmentState(pipeDesc, firstDrawBatch);
 }
 
 uint64_t
 HdStRenderPassState::GetGraphicsPipelineHash(
-    HdSt_GeometricShaderSharedPtr const & geometricShader) const
+    HdSt_GeometricShaderSharedPtr const & geometricShader,
+    bool firstDrawBatch) const
 {
     // Hash all of the state that is captured in the pipeline state object.
     uint64_t hash = TfHash::Combine(
@@ -1274,7 +1274,7 @@ HdStRenderPassState::GetGraphicsPipelineHash(
         geometricShader->ResolveCullMode(_cullStyle),
         geometricShader->GetHgiPrimitiveType(),
         geometricShader->GetPrimitiveIndexSize());
-    
+
     // Hash the aov bindings by name and format.
     for (HdRenderPassAovBinding const& binding : GetAovBindings()) {
         HdStRenderBuffer *renderBuffer =
@@ -1282,13 +1282,16 @@ HdStRenderPassState::GetGraphicsPipelineHash(
         
         const uint32_t msaaCount = renderBuffer->IsMultiSampled() ?
             renderBuffer->GetMSAASampleCount() : 1;
-
+        const bool clear =
+            firstDrawBatch ? !binding.clearValue.IsEmpty() : false;
+        
         hash = TfHash::Combine(hash,
                                binding.aovName,
                                renderBuffer->GetFormat(),
-                               msaaCount);
+                               msaaCount,
+                               clear);
     }
-    
+
     return hash;
 }
 

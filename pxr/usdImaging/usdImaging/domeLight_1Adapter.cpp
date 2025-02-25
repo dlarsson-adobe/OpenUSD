@@ -1,25 +1,8 @@
 //
 // Copyright 2017 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 #include "pxr/usdImaging/usdImaging/domeLight_1Adapter.h"
 #include "pxr/usdImaging/usdImaging/delegate.h"
@@ -110,6 +93,44 @@ private:
     UsdPrim _prim;
 };
 
+// An HdTypedSampledDataSource that determines the list of portals
+class _PortalsDataSource : public HdTypedSampledDataSource<SdfPathVector>
+{
+public:
+    HD_DECLARE_DATASOURCE(_PortalsDataSource);
+
+    _PortalsDataSource(const UsdPrim& prim)
+    : _prim(prim)
+    {
+    }
+
+    VtValue GetValue(HdSampledDataSource::Time shutterOffset) override
+    {
+        return VtValue(GetTypedValue(shutterOffset));
+    }
+
+    SdfPathVector GetTypedValue(HdSampledDataSource::Time shutterOffset) override
+    {
+        UsdRelationship portalsRel = UsdLuxDomeLight_1(_prim).GetPortalsRel();
+        SdfPathVector portalPaths;
+        if (portalsRel) {
+            portalsRel.GetForwardedTargets(&portalPaths);
+        }
+        return portalPaths;
+    }
+
+    bool GetContributingSampleTimesForInterval(
+        HdSampledDataSource::Time startTime,
+        HdSampledDataSource::Time endTime,
+        std::vector<HdSampledDataSource::Time>* outSampleTimes) override
+    {
+        return false;
+    }
+
+private:
+    UsdPrim _prim;
+};
+
 } // namespace anonymous
 
 UsdImagingDomeLight_1Adapter::~UsdImagingDomeLight_1Adapter() 
@@ -146,7 +167,9 @@ UsdImagingDomeLight_1Adapter::GetImagingSubprimData(
             HdLightSchema::GetSchemaToken(),
             HdRetainedContainerDataSource::New(
                 HdLightTokens->domeOffset,
-                _LazyDomeOffsetDataSource::New(prim))),
+                _LazyDomeOffsetDataSource::New(prim),
+                HdTokens->portals,
+                _PortalsDataSource::New(prim))),
         UsdImagingLightAdapter::GetImagingSubprimData(
             prim, subprim, stageGlobals));
 }
@@ -163,7 +186,8 @@ UsdImagingDomeLight_1Adapter::InvalidateImagingSubprim(
             prim, subprim, properties, invalidationType);
 
     for (const TfToken &propertyName : properties) {
-        if (propertyName == UsdLuxTokens->poleAxis) {
+        if (propertyName == UsdLuxTokens->poleAxis ||
+            propertyName == UsdLuxTokens->portals) {
             result.insert(HdLightSchema::GetDefaultLocator());
         }
     }

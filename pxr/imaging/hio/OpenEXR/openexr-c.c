@@ -1,25 +1,8 @@
 //
 // Copyright 2023 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 
 #include "pxr/base/arch/pragmas.h"
@@ -153,9 +136,11 @@ bool nanoexr_Gaussian_resample(const nanoexr_ImageData_t* src,
     // again for height
     radius = ceilf(sqrtf(-2.0f * sigma_h * sigma_h * logf(1.0f - support)));
     int filterSize_h = (int)radius;
-    if (!filterSize_h)
+    if (!filterSize_h) {
+        free(filter_w);
         return false;
-    
+    }
+
     float* filter_h = (float*) malloc(sizeof(float) * (1 + filterSize_h) * 2);
     sum = 0.0f;
     for (int i = 0; i <= filterSize_h; i++) {
@@ -392,13 +377,26 @@ exr_result_t nanoexr_write_exr(
         return result;
     }
 
-    if (red) {
+    if (alpha) {
         result = exr_add_channel(
                      exr,
                      partidx,
-                     "R",
+                     "A",
                      pixel_type,
-                     EXR_PERCEPTUALLY_LOGARITHMIC, // hint that data is an image
+                     EXR_PERCEPTUALLY_LOGARITHMIC,
+                     1, 1); // x & y sampling rate
+        if (result != EXR_ERR_SUCCESS) {
+            return result;
+        }
+    }
+    
+    if (blue) {
+        result = exr_add_channel(
+                     exr,
+                     partidx,
+                     "B",
+                     pixel_type,
+                     EXR_PERCEPTUALLY_LOGARITHMIC,
                      1, 1); // x & y sampling rate
         if (result != EXR_ERR_SUCCESS) {
             return result;
@@ -417,27 +415,14 @@ exr_result_t nanoexr_write_exr(
             return result;
         }
     }
-
-    if (blue) {
+    
+    if (red) {
         result = exr_add_channel(
                      exr,
                      partidx,
-                     "B",
+                     "R",
                      pixel_type,
-                     EXR_PERCEPTUALLY_LOGARITHMIC,
-                     1, 1); // x & y sampling rate
-        if (result != EXR_ERR_SUCCESS) {
-            return result;
-        }
-    }
-
-    if (alpha) {
-        result = exr_add_channel(
-                     exr,
-                     partidx,
-                     "A",
-                     pixel_type,
-                     EXR_PERCEPTUALLY_LOGARITHMIC,
+                     EXR_PERCEPTUALLY_LOGARITHMIC, // hint that data is an image
                      1, 1); // x & y sampling rate
         if (result != EXR_ERR_SUCCESS) {
             return result;
@@ -511,35 +496,37 @@ exr_result_t nanoexr_write_exr(
         
         int c = 0;
         encoder.channel_count = channelCount;
-        if (red) {
-            encoder.channels[c].user_pixel_stride = redPixelStride;
-            encoder.channels[c].user_line_stride  = redLineStride;
-            encoder.channels[c].encode_from_ptr   = pRed;
+        if (alpha) {
+            encoder.channels[c].user_pixel_stride = alphaPixelStride;
+            encoder.channels[c].user_line_stride  = alphaLineStride;
             encoder.channels[c].height            = scansperchunk; // chunk height
-            encoder.channels[c].width             = dataw.max.x - dataw.min.y + 1;
-            ++c;
-        }
-        if (green) {
-            encoder.channels[c].user_pixel_stride = greenPixelStride;
-            encoder.channels[c].user_line_stride  = greenLineStride;
-            encoder.channels[c].height            = scansperchunk; // chunk height
-            encoder.channels[c].width             = dataw.max.x - dataw.min.y + 1;
-            encoder.channels[c].encode_from_ptr   = pGreen;
+            encoder.channels[c].width             = dataw.max.x - dataw.min.x + 1;
+            encoder.channels[c].encode_from_ptr   = pAlpha;
             ++c;
         }
         if (blue) {
             encoder.channels[c].user_pixel_stride = bluePixelStride;
             encoder.channels[c].user_line_stride  = blueLineStride;
             encoder.channels[c].height            = scansperchunk; // chunk height
+            encoder.channels[c].width             = dataw.max.x - dataw.min.x + 1;
             encoder.channels[c].encode_from_ptr   = pBlue;
             ++c;
         }
-        if (alpha) {
-            encoder.channels[c].user_pixel_stride = alphaPixelStride;
-            encoder.channels[c].user_line_stride  = alphaLineStride;
+        if (green) {
+            encoder.channels[c].user_pixel_stride = greenPixelStride;
+            encoder.channels[c].user_line_stride  = greenLineStride;
             encoder.channels[c].height            = scansperchunk; // chunk height
-            encoder.channels[c].width             = dataw.max.x - dataw.min.y + 1;
-            encoder.channels[c].encode_from_ptr   = pAlpha;
+            encoder.channels[c].width             = dataw.max.x - dataw.min.x + 1;
+            encoder.channels[c].encode_from_ptr   = pGreen;
+            ++c;
+        }
+        if (red) {
+            encoder.channels[c].user_pixel_stride = redPixelStride;
+            encoder.channels[c].user_line_stride  = redLineStride;
+            encoder.channels[c].height            = scansperchunk; // chunk height
+            encoder.channels[c].width             = dataw.max.x - dataw.min.x + 1;
+            encoder.channels[c].encode_from_ptr   = pRed;
+            ++c;
         }
 
         if (first) {
@@ -589,80 +576,42 @@ int nanoexr_getPixelTypeSize(exr_pixel_type_t t)
     }
 }
 
-static bool strIsRed(const char* layerName, const char* str) {
-    if (layerName && (strncmp(layerName, str, strlen(layerName)) != 0))
+// strcasecmp is not available in the MSVC stdlib.
+#ifdef _MSC_VER
+#define strcasecmp _stricmp
+#endif
+
+static bool strIsComponent(const char* layerName, 
+                           const char* str, 
+                           const char* component)
+{
+    if (!str || !component)
         return false;
 
-    // check if the case folded string is R or RED, or ends in .R or .RED
-    char* folded = strdup(str);
-    for (int i = 0; folded[i]; ++i) {
-        folded[i] = tolower(folded[i]);
+    // if the layername is specified, it must match the beginning of the string.
+    // if layername was specified, move the string pointer past it
+    if (layerName) {
+        if (strncmp(layerName, str, strlen(layerName)) != 0)
+            return false;
+        str += strlen(layerName);
     }
-    if (strcmp(folded, "r") == 0 || strcmp(folded, "red") == 0)
-        return true;
-    size_t l = strlen(folded);
-    if ((l > 2) && (folded[l - 2] == '.') && (folded[l - 1] == 'r'))
-        return true;
-    if (l < 4)
-        return false;
-    return strcmp(folded + l - 4, ".red");
-}
 
-static bool strIsGreen(const char* layerName, const char* str) {
-    if (layerName && (strncmp(layerName, str, strlen(layerName)) != 0))
-        return false;
-
-    // check if the case folded string is G or GREEN, or ends in .G or .GREEN
-    char* folded = strdup(str);
-    for (int i = 0; folded[i]; ++i) {
-        folded[i] = tolower(folded[i]);
+    // search backwards in str for a dot. If found, move the string pointer
+    // past it
+    const char* dot = strrchr(str, '.');
+    if (dot) {
+        str = dot + 1;
     }
-    if (strcmp(folded, "g") == 0 || strcmp(folded, "green") == 0)
-        return true;
-    size_t l = strlen(folded);
-    if ((l > 2) && (folded[l - 2] == '.') && (folded[l - 1] == 'g'))
-        return true;
-    if (l < 6)
-        return false;
-    return strcmp(folded + l - 6, ".green");
-}
 
-static bool strIsBlue(const char* layerName, const char* str) {
-    if (layerName && (strncmp(layerName, str, strlen(layerName)) != 0))
-        return false;
-
-    // check if the case folded string is B or BLUE, or ends in .B or .BLUE
-    char* folded = strdup(str);
-    for (int i = 0; folded[i]; ++i) {
-        folded[i] = tolower(folded[i]);
+    // if one character is left, then do a case insensitive comparison with the
+    // first character of the component.
+    if (strlen(str) == 1) {
+        return tolower(str[0]) == tolower(component[0]);
     }
-    if (strcmp(folded, "b") == 0 || strcmp(folded, "blue") == 0)
-        return true;
-    size_t l = strlen(folded);
-    if ((l > 2) && (folded[l - 2] == '.') && (folded[l - 1] == 'b'))
-        return true;
-    if (l < 5)
-        return false;
-    return strcmp(folded + l - 5, ".blue");
-}
 
-static bool strIsAlpha(const char* layerName, const char* str) {
-    if (layerName && (strncmp(layerName, str, strlen(layerName)) != 0))
-        return false;
-
-    // check if the case folded string is A or ALPHA, or ends in .A or .ALPHA
-    char* folded = strdup(str);
-    for (int i = 0; folded[i]; ++i) {
-        folded[i] = tolower(folded[i]);
-    }
-    if (strcmp(folded, "a") == 0 || strcmp(folded, "alpha") == 0)
-        return true;
-    size_t l = strlen(folded);
-    if ((l > 2) && (folded[l - 2] == '.') && (folded[l - 1] == 'a'))
-        return true;
-    if (l < 6)
-        return false;
-    return strcmp(folded + l - 6, ".alpha");
+    // The final check is to return true if a case insensitive comparison of
+    // the string with the component is true.
+    return strcasecmp(str, component) == 0;
 }
 
 void nanoexr_release_image_data(nanoexr_ImageData_t* imageData)
@@ -707,27 +656,28 @@ static exr_result_t _nanoexr_rgba_decoding_initialize(
     }
     for (int c = 0; c < decoder->channel_count; ++c) {
         int channelIndex = -1;
-        if (strIsRed(layerName, decoder->channels[c].channel_name)) {
+        decoder->channels[c].decode_to_ptr = NULL;
+        if (strIsComponent(layerName, decoder->channels[c].channel_name, "red")
+            || (rgba[0] == -1 && strIsComponent(layerName, decoder->channels[c].channel_name, "y"))) {
             rgba[0] = c;
             channelIndex = 0;
         }
-        else if (strIsGreen(layerName, decoder->channels[c].channel_name)) {
+        else if (strIsComponent(layerName, decoder->channels[c].channel_name, "green")) {
             rgba[1] = c;
             channelIndex = 1;
         }
-        else if (strIsBlue(layerName, decoder->channels[c].channel_name)) {
+        else if (strIsComponent(layerName, decoder->channels[c].channel_name, "blue")) {
             rgba[2] = c;
             channelIndex = 2;
         }
-        else if (strIsAlpha(layerName, decoder->channels[c].channel_name)) {
+        else if (strIsComponent(layerName, decoder->channels[c].channel_name, "alpha")) {
             rgba[3] = c;
             channelIndex = 3;
         }
         if (channelIndex == -1 || channelIndex >= img->channelCount) {
-            decoder->channels[c].decode_to_ptr = 0;
             continue;
         }
-        // precompute pixel channel byte offset
+        // calculate start of pixel data for the target channel
         decoder->channels[c].decode_to_ptr = (uint8_t*) (ptrdiff_t) (channelIndex * bytesPerChannel);
     }
     return rv;
@@ -758,11 +708,11 @@ exr_result_t nanoexr_read_tiled_exr(exr_context_t exr,
 
         int levelWidth = 0, levelHeight = 0;
         rv = exr_get_level_sizes(exr, partIndex, mipLevel, mipLevel, &levelWidth, &levelHeight);
-        if (rv != EXR_ERR_SUCCESS)
+        if (rv != EXR_ERR_SUCCESS || !levelWidth || !levelHeight)
             break;
 
-        int32_t xTiles = (img->width + tilew - 1) / tilew;
-        int32_t yTiles = (img->height + tileh - 1) / tileh;
+        int32_t xTiles = (levelWidth + tilew - 1) / tilew;
+        int32_t yTiles = (levelHeight + tileh - 1) / tileh;
         int pixelStride = img->channelCount * bytesPerChannel;
         int imageYStride = img->width * pixelStride;
         
@@ -797,15 +747,16 @@ exr_result_t nanoexr_read_tiled_exr(exr_context_t exr,
                 curtilestart += y * imageYStride;
                 curtilestart += x * pixelStride;
                 for (int c = 0; c < decoder.channel_count; ++c) {
-                    if (rgbaIndex[c] >= 0) {
-                        decoder.channels[c].decode_to_ptr = curtilestart + rgbaIndex[c] * bytesPerChannel;
-                    }
-                    else {
-                        decoder.channels[c].decode_to_ptr = NULL;
-                    }
                     decoder.channels[c].user_pixel_stride = pixelStride;
                     decoder.channels[c].user_line_stride = imageYStride;
                     decoder.channels[c].user_bytes_per_element = bytesPerChannel;
+                    decoder.channels[c].decode_to_ptr = NULL;
+                    for (int i = 0; i < 4; ++i) {
+                        if (rgbaIndex[i] == c) {
+                            decoder.channels[c].decode_to_ptr = curtilestart + i * bytesPerChannel;
+                            break;
+                        }
+                    }
                 }
                 
                 rv = exr_decoding_run(exr, partIndex, &decoder);
@@ -878,8 +829,14 @@ exr_result_t nanoexr_read_scanline_exr(exr_context_t exr,
                     break;
             }
             uint8_t* start = img->data + (chunky - img->dataWindowMinY) * img->width * pixelbytes;
-            for (int c = 0; c < decoder.channel_count; ++c) {                
-                decoder.channels[c].decode_to_ptr = start + rgbaIndex[c] * bytesPerChannel;
+            for (int c = 0; c < decoder.channel_count; ++c) {
+                decoder.channels[c].decode_to_ptr = NULL;
+                for (int i = 0; i < 4; ++i) {
+                    if (rgbaIndex[i] == c) {
+                        decoder.channels[c].decode_to_ptr = start + i * bytesPerChannel;
+                        break;
+                    }
+                }
             }
             
             rv = exr_decoding_run(exr, partIndex, &decoder);
@@ -929,43 +886,45 @@ void fill_channel_float(nanoexr_ImageData_t* img, int channel, float value) {
     }
 }
 
-void copy_channel_u16(nanoexr_ImageData_t* img, int from_channel, int to_channel) {
+void copy_channel_u16(nanoexr_ImageData_t* img, uint8_t* dst_data, uint8_t* src_data, int dst_channel, int src_channel) {
+    int dst_off = dst_channel * 2;
+    int src_off = src_channel * 2;
     for (int y = 0; y < img->height; ++y) {
+        int y_off = y * img->width * img->channelCount * 2;
+        uint8_t* dst_line_start = dst_data + y_off + dst_off;
+        uint8_t* src_line_start = src_data + y_off + src_off;
         for (int x = 0; x < img->width; ++x) {
-            uint8_t* curpixel = img->data + 
-                y * img->width * img->channelCount * 2 + 
-                x * img->channelCount * 2 + from_channel * 2;
-            uint8_t* topixel = img->data + 
-                y * img->width * img->channelCount * 2 + 
-                x * img->channelCount * 2 + to_channel * 2;
-            *(uint16_t*) topixel = *(uint16_t*) curpixel;
+            int x_off = x * img->channelCount * 2;
+            uint8_t* dstpixel = dst_line_start + x_off;
+            uint8_t* srcpixel = src_line_start + x_off;
+            *(uint16_t*) dstpixel = *(uint16_t*) srcpixel;
         }
     }
 }
 
-void copy_channel_u32(nanoexr_ImageData_t* img, int from_channel, int to_channel) {
+void copy_channel_u32(nanoexr_ImageData_t* img, uint8_t* dst_data, uint8_t* src_data, int dst_channel, int src_channel) {
     for (int y = 0; y < img->height; ++y) {
         for (int x = 0; x < img->width; ++x) {
-            uint8_t* curpixel = img->data + 
-                y * img->width * img->channelCount * 4 + 
-                x * img->channelCount * 4 + from_channel * 4;
-            uint8_t* topixel = img->data + 
-                y * img->width * img->channelCount * 4 + 
-                x * img->channelCount * 4 + to_channel * 4;
+            uint8_t* curpixel = src_data +
+                y * img->width * img->channelCount * 4 +
+                x * img->channelCount * 4 + src_channel * 4;
+            uint8_t* topixel = dst_data +
+                y * img->width * img->channelCount * 4 +
+                x * img->channelCount * 4 + dst_channel * 4;
             *(uint32_t*) topixel = *(uint32_t*) curpixel;
         }
     }
 }
 
-void copy_channel_float(nanoexr_ImageData_t* img, int from_channel, int to_channel) {
+void copy_channel_float(nanoexr_ImageData_t* img, uint8_t* dst_data, uint8_t* src_data, int dst_channel, int src_channel) {
     for (int y = 0; y < img->height; ++y) {
         for (int x = 0; x < img->width; ++x) {
-            uint8_t* curpixel = img->data + 
-                y * img->width * img->channelCount * 4 + 
-                x * img->channelCount * 4 + from_channel * 4;
-            uint8_t* topixel = img->data + 
-                y * img->width * img->channelCount * 4 + 
-                x * img->channelCount * 4 + to_channel * 4;
+            uint8_t* curpixel = src_data +
+                y * img->width * img->channelCount * 4 +
+                x * img->channelCount * 4 + src_channel * 4;
+            uint8_t* topixel = dst_data +
+                y * img->width * img->channelCount * 4 +
+                x * img->channelCount * 4 + dst_channel * 4;
             *(float*) topixel = *(float*) curpixel;
         }
     }
@@ -979,6 +938,9 @@ exr_result_t nanoexr_read_exr(const char* filename,
                               int numChannelsToRead,
                               int partIndex,
                               int mipLevel) {
+    if (numChannelsToRead == 0) {
+        return EXR_ERR_SUCCESS; // successfully read nothing
+    }
     exr_context_t exr = NULL;
     exr_result_t rv = EXR_ERR_SUCCESS;
     exr_context_initializer_t cinit = EXR_DEFAULT_CONTEXT_INITIALIZER;
@@ -987,22 +949,22 @@ exr_result_t nanoexr_read_exr(const char* filename,
     cinit.user_data = callback_userData;
     rv = exr_test_file_header(filename, &cinit);
     if (rv != EXR_ERR_SUCCESS) {
-        fprintf(stderr, "nanoexr header error: %s\n", 
+        fprintf(stderr, "nanoexr header error: %s\n",
                 exr_get_default_error_message(rv));
         return rv;
     }
 
     rv = exr_start_read(&exr, filename, &cinit);
     if (rv != EXR_ERR_SUCCESS) {
-        fprintf(stderr, "nanoexr start error: %s\n", 
-               exr_get_default_error_message(rv));
+        fprintf(stderr, "nanoexr start error: %s\n",
+                exr_get_default_error_message(rv));
         exr_finish(&exr);
         return rv;
     }
     exr_storage_t storage;
     rv = exr_get_storage(exr, partIndex, &storage);
     if (rv != EXR_ERR_SUCCESS) {
-        fprintf(stderr, "nanoexr storage error: %s\n", 
+        fprintf(stderr, "nanoexr storage error: %s\n",
                 exr_get_default_error_message(rv));
         exr_finish(&exr);
         return rv;
@@ -1020,7 +982,7 @@ exr_result_t nanoexr_read_exr(const char* filename,
     exr_compression_t compression;
     rv = exr_get_compression(exr, partIndex, &compression);
     if (rv != EXR_ERR_SUCCESS) {
-        fprintf(stderr, "nanoexr compression error: %s\n", 
+        fprintf(stderr, "nanoexr compression error: %s\n",
                 exr_get_default_error_message(rv));
         exr_finish(&exr);
         return rv;
@@ -1030,7 +992,7 @@ exr_result_t nanoexr_read_exr(const char* filename,
     exr_attr_box2i_t displaywin;
     rv = exr_get_data_window(exr, partIndex, &datawin);
     if (rv != EXR_ERR_SUCCESS) {
-        fprintf(stderr, "nanoexr data window error: %s\n", 
+        fprintf(stderr, "nanoexr data window error: %s\n",
                 exr_get_default_error_message(rv));
         exr_finish(&exr);
         return rv;
@@ -1049,7 +1011,7 @@ exr_result_t nanoexr_read_exr(const char* filename,
     const exr_attr_chlist_t* chlist = NULL;
     rv = exr_get_channels(exr, partIndex, &chlist);
     if (rv != EXR_ERR_SUCCESS) {
-        fprintf(stderr, "nanoexr channels error: %s\n", 
+        fprintf(stderr, "nanoexr channels error: %s\n",
                 exr_get_default_error_message(rv));
         exr_finish(&exr);
         return rv;
@@ -1062,14 +1024,16 @@ exr_result_t nanoexr_read_exr(const char* filename,
         exr_finish(&exr);
         return rv;
     }
-
+    
+    width >>= mipLevel;
+    height >>= mipLevel;
     img->channelCount = numChannelsToRead;
     img->width = width;
     img->height = height;
     img->dataSize = width * height * img->channelCount * bytesPerChannel;
     img->pixelType = pixelType;
-    img->dataWindowMinY = datawin.min.y;
-    img->dataWindowMaxY = datawin.max.y;
+    img->dataWindowMinY = datawin.min.y >> mipLevel;
+    img->dataWindowMaxY = (datawin.max.y+1) >> mipLevel;
     img->data = (unsigned char*) malloc(img->dataSize);
     if (img->data == NULL) {
         fprintf(stderr, "nanoexr error: could not allocate memory for image data\n");
@@ -1083,7 +1047,7 @@ exr_result_t nanoexr_read_exr(const char* filename,
         rv = nanoexr_read_tiled_exr(exr, img, layerName, partIndex, mipLevel, rgbaIndex);
     }
     else {
-        // n ote - scanline images do not support mip levels
+        // note - scanline images do not support mip levels
         rv = nanoexr_read_scanline_exr(exr, img, layerName, partIndex, rgbaIndex);
     }
     
@@ -1096,12 +1060,18 @@ exr_result_t nanoexr_read_exr(const char* filename,
 
     uint16_t oneValue = float_to_half(1.0f);
     uint16_t zeroValue = float_to_half(0.0f);
-
-    // if the image is rgba, and any of the channels are missing, fill them in
-    // by propagating the channel to the left if possible. If not, fill with
-    // zero or one. Alpha is always filled with one.
-    if (img->channelCount == 4) {
-        if (rgbaIndex[3] == -1) {
+    
+    // if the image has more channels than actually read, and any of the channels 
+    // is missing, fill them in by propagating the channel to the left if 
+    // possible. If not, fill with zero or one. Alpha is always filled with one.
+    int readChannelCount = 0;
+    for (int i = 0; i < 4; ++i) {
+        if (rgbaIndex[i] >= 0) {
+            readChannelCount++;
+        }
+    }
+    if (img->channelCount > readChannelCount) {
+        if (img->channelCount == 4 && rgbaIndex[3] == -1) {
             // fill the alpha channel with 1.0
             if (img->pixelType == EXR_PIXEL_HALF) {
                 fill_channel_u16(img, 3, oneValue);
@@ -1114,18 +1084,20 @@ exr_result_t nanoexr_read_exr(const char* filename,
                 fill_channel_u32(img, 3, 0);
             }
         }
-        if (rgbaIndex[2] == -1) {
+        if (img->channelCount > 2 && rgbaIndex[2] == -1) {
             // if G exists, propagate it, else if R exists, propagate it, else fill with zero
+            // note that the data has been de-swizzled already so at this point,
+            // rgbaIndex serves only as a sentinel
             int srcChannel = rgbaIndex[1] >= 0 ? 1 : (rgbaIndex[0] >= 0 ? 0 : -1);
             if (srcChannel >= 0) {
                 if (img->pixelType == EXR_PIXEL_HALF) {
-                    copy_channel_u16(img, srcChannel, 2);
+                    copy_channel_u16(img, img->data, img->data, 2, srcChannel);
                 }
                 else if (img->pixelType == EXR_PIXEL_FLOAT) {
-                    copy_channel_float(img, srcChannel, 2);
+                    copy_channel_float(img, img->data, img->data, 2, srcChannel);
                 }
                 else if (img->pixelType == EXR_PIXEL_UINT) {
-                    copy_channel_u32(img, srcChannel, 2);
+                    copy_channel_u32(img, img->data, img->data, 2, srcChannel);
                 }
             }
             else {
@@ -1140,18 +1112,18 @@ exr_result_t nanoexr_read_exr(const char* filename,
                 }
             }
         }
-        if (rgbaIndex[1] == -1) {
+        if (img->channelCount > 1 && rgbaIndex[1] == -1) {
             // if R exists, propagate it, else fill with zero
             int srcChannel = rgbaIndex[0] >= 0 ? 0 : -1;
             if (srcChannel >= 0) {
                 if (img->pixelType == EXR_PIXEL_HALF) {
-                    copy_channel_u16(img, srcChannel, 1);
+                    copy_channel_u16(img, img->data, img->data, 1, srcChannel);
                 }
                 else if (img->pixelType == EXR_PIXEL_FLOAT) {
-                    copy_channel_float(img, srcChannel, 1);
+                    copy_channel_float(img, img->data, img->data, 1, srcChannel);
                 }
                 else if (img->pixelType == EXR_PIXEL_UINT) {
-                    copy_channel_u32(img, srcChannel, 1);
+                    copy_channel_u32(img, img->data, img->data, 1, srcChannel);
                 }
             }
             else {
@@ -1179,7 +1151,7 @@ exr_result_t nanoexr_read_exr(const char* filename,
             }
         }
     }
-
+    
     rv = exr_finish(&exr);
     if (rv != EXR_ERR_SUCCESS) {
         fprintf(stderr, "nanoexr finish error: %s\n", 

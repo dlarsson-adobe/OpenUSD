@@ -1,6 +1,14 @@
 set(PXR_PREFIX pxr/usdImaging)
 set(PXR_PACKAGE usdBakeMtlx)
 
+# MaterialX's MaterialXRenderGlsl library, which is used by usdBakeMtlx,
+# requires OpenGL.
+if (NOT ${PXR_ENABLE_GL_SUPPORT} OR PXR_APPLE_EMBEDDED)
+    message(STATUS
+        "Skipping ${PXR_PACKAGE} because PXR_ENABLE_GL_SUPPORT is OFF or PXR_APPLE_EMBEDDED is ON")
+    return()
+endif()
+
 pxr_library(usdBakeMtlx
     LIBRARIES
         tf
@@ -14,18 +22,11 @@ pxr_library(usdBakeMtlx
         MaterialXFormat
         MaterialXRenderGlsl
 
-    INCLUDE_DIRS
-        ${Boost_INCLUDE_DIRS}
-        ${PYTHON_INCLUDE_DIRS}
-
     PUBLIC_CLASSES
         bakeMaterialX
 
     PUBLIC_HEADERS
         api.h
-
-    PYTHON_CPPFILES
-        moduleDeps.cpp
 
     PYMODULE_CPPFILES
         module.cpp

@@ -1,25 +1,8 @@
 //
 // Copyright 2016 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 
 #include "pxr/pxr.h"
@@ -28,6 +11,7 @@
 #include "pxr/usd/sdf/layerOffset.h"
 #include "pxr/usd/sdf/parserValueContext.h"
 #include "pxr/usd/sdf/pathExpression.h"
+#include "pxr/usd/sdf/pathParser.h"
 #include "pxr/usd/sdf/payload.h"
 #include "pxr/usd/sdf/reference.h"
 #include "pxr/usd/sdf/schemaTypeRegistration.h"
@@ -41,7 +25,9 @@
 #include "pxr/base/tf/diagnostic.h"
 #include "pxr/base/tf/envSetting.h"
 #include "pxr/base/tf/instantiateSingleton.h"
+#include "pxr/base/tf/unicodeUtils.h"
 #include "pxr/base/trace/trace.h"
+#include "pxr/base/ts/spline.h"
 #include "pxr/base/vt/dictionary.h"
 
 #include <deque>
@@ -392,7 +378,9 @@ SDF_VALIDATE_WRAPPER(InheritPath, SdfPath);
 SDF_VALIDATE_WRAPPER(Payload, SdfPayload);
 SDF_VALIDATE_WRAPPER(Reference, SdfReference);
 SDF_VALIDATE_WRAPPER(RelationshipTargetPath, SdfPath);
-SDF_VALIDATE_WRAPPER(RelocatesPath, SdfPath);
+SDF_VALIDATE_WRAPPER(RelocatesSourcePath, SdfPath);
+SDF_VALIDATE_WRAPPER(RelocatesTargetPath, SdfPath);
+SDF_VALIDATE_WRAPPER(Relocate, SdfRelocate);
 SDF_VALIDATE_WRAPPER(SpecializesPath, SdfPath);
 SDF_VALIDATE_WRAPPER(SubLayer, std::string);
 SDF_VALIDATE_WRAPPER(VariantIdentifier, std::string);
@@ -772,6 +760,7 @@ SdfSchemaBase::_RegisterStandardFields()
     _DoRegisterField(SdfFieldKeys->SessionOwner, "");
     _DoRegisterField(SdfFieldKeys->Specializes, SdfPathListOp())
         .ListValueValidator(&_ValidateSpecializesPath);
+    _DoRegisterField(SdfFieldKeys->Spline, TsSpline());
     _DoRegisterField(SdfFieldKeys->Suffix, "");
     _DoRegisterField(SdfFieldKeys->SuffixSubstitutions, VtDictionary())
         .MapKeyValidator(&_ValidateIsNonEmptyString)
@@ -782,9 +771,11 @@ SdfSchemaBase::_RegisterStandardFields()
         .ReadOnly()
         .ListValueValidator(&_ValidateRelationshipTargetPath);
 
+    _DoRegisterField(SdfFieldKeys->LayerRelocates, SdfRelocates())
+        .ListValueValidator(&_ValidateRelocate);
     _DoRegisterField(SdfFieldKeys->Relocates, SdfRelocatesMap())
-        .MapKeyValidator(&_ValidateRelocatesPath)
-        .MapValueValidator(&_ValidateRelocatesPath);
+        .MapKeyValidator(&_ValidateRelocatesSourcePath)
+        .MapValueValidator(&_ValidateRelocatesTargetPath);
     _DoRegisterField(SdfFieldKeys->Specifier, SdfSpecifierOver);
     _DoRegisterField(SdfFieldKeys->StartFrame, 0.0);
     _DoRegisterField(SdfFieldKeys->StartTimeCode, 0.0);
@@ -860,6 +851,7 @@ SdfSchemaBase::_RegisterStandardFields()
         .MetadataField(SdfFieldKeys->StartFrame)
 
         .Field(SdfChildrenKeys->PrimChildren)
+        .Field(SdfFieldKeys->LayerRelocates)
         .Field(SdfFieldKeys->PrimOrder)
         .Field(SdfFieldKeys->SubLayers)
         .Field(SdfFieldKeys->SubLayerOffsets);
@@ -929,7 +921,6 @@ SdfSchemaBase::_RegisterStandardFields()
 
         .Field(SdfFieldKeys->Comment)
         .Field(SdfFieldKeys->Default)
-        .Field(SdfFieldKeys->TimeSamples)
 
         .MetadataField(SdfFieldKeys->AssetInfo,
                        SdfMetadataDisplayGroupTokens->core)
@@ -961,9 +952,12 @@ SdfSchemaBase::_RegisterStandardFields()
         .CopyFrom(property)
         .Field(SdfFieldKeys->TypeName,                /* required = */ true)
 
+        .Field(SdfFieldKeys->Spline)
         .Field(SdfChildrenKeys->ConnectionChildren)
         .Field(SdfFieldKeys->ConnectionPaths)
         .Field(SdfFieldKeys->DisplayUnit)
+        .Field(SdfFieldKeys->TimeSamples)
+
         .MetadataField(SdfFieldKeys->AllowedTokens,
                        SdfMetadataDisplayGroupTokens->core)
         .MetadataField(SdfFieldKeys->ColorSpace, 
@@ -1128,6 +1122,13 @@ SdfSchemaBase::_CheckAndGetSpecDefinition(SdfSpecType specType) const
     return def;
 }
 
+const SdfSchemaBase::SpecDefinition* 
+SdfSchemaBase::_IssueErrorForInvalidSpecType(SdfSpecType specType) const
+{
+    TF_RUNTIME_ERROR("Invalid spec type %d", static_cast<int>(specType));
+    return nullptr;
+}
+
 bool 
 SdfSchemaBase::IsValidFieldForSpec(const TfToken &fieldKey, 
                                SdfSpecType specType) const
@@ -1287,28 +1288,34 @@ SdfSchemaBase::IsValidNamespacedIdentifier(const std::string& identifier)
 SdfAllowed
 SdfSchemaBase::IsValidVariantIdentifier(const std::string& identifier)
 {
-    // Allow [[:alnum:]_|\-]+ with an optional leading dot.
+    // use the path parser rules to determine validity of variant name
+    Sdf_PathParser::PPContext context;
+    bool result = false;
+    try
+    {
+        result = Sdf_PathParser::PEGTL_NS::parse<
+            Sdf_PathParser::PEGTL_NS::must<Sdf_PathParser::VariantName,
+            Sdf_PathParser::PEGTL_NS::eof>>(
+                Sdf_PathParser::PEGTL_NS::string_input<> {identifier, ""}, context);
 
-    std::string::const_iterator first = identifier.begin();
-    std::string::const_iterator last = identifier.end();
-
-    // Allow optional leading dot.
-    if (first != last && *first == '.') {
-        ++first;
-    }
-
-    for (; first != last; ++first) {
-        char c = *first;
-        if (!(isalnum(c) || (c == '_') || (c == '|') || (c == '-'))) {
+        if (!result)
+        {
             return SdfAllowed(TfStringPrintf(
-                    "\"%s\" is not a valid variant "
-                    "name due to '%c' at index %d",
-                    identifier.c_str(),
-                    c,
-                    (int)(first - identifier.begin())));
+                "\"%s\" is not a valid variant name",
+                identifier.c_str()));
         }
     }
+    catch(const Sdf_PathParser::PEGTL_NS::parse_error& e)
+    {
+        return SdfAllowed(TfStringPrintf(
+            "\"%s\" is not a valid variant "
+            "name due to '%s'",
+            identifier.c_str(),
+            e.what()));
 
+        return false;
+    }
+    
     return true;
 }
 
@@ -1331,7 +1338,7 @@ SdfSchemaBase::IsValidVariantSelection(const std::string& sel)
 }
 
 SdfAllowed 
-SdfSchemaBase::IsValidRelocatesPath(const SdfPath& path)
+SdfSchemaBase::IsValidRelocatesSourcePath(const SdfPath& path)
 {
     if (_PathContainsProhibitedVariantSelection(path)) {
         return SdfAllowed("Relocate paths cannot contain "
@@ -1340,6 +1347,31 @@ SdfSchemaBase::IsValidRelocatesPath(const SdfPath& path)
     if (!(path.IsPrimPath())) {
         return SdfAllowed("Relocate path <" + path.GetString() + 
                           "> must be a prim path");
+    }
+
+    return true;
+}
+
+SdfAllowed 
+SdfSchemaBase::IsValidRelocatesTargetPath(const SdfPath& path)
+{
+    // Relocates target paths are allowed to be empty but source paths are not.
+    if (path.IsEmpty()) {
+        return true;
+    }
+    return IsValidRelocatesSourcePath(path);
+}
+
+SdfAllowed 
+SdfSchemaBase::IsValidRelocate(const SdfRelocate &relocate)
+{
+    if (SdfAllowed isValid = IsValidRelocatesSourcePath(relocate.first);
+            !isValid) {
+        return isValid;
+    }
+    if (SdfAllowed isValid = IsValidRelocatesTargetPath(relocate.second);
+            !isValid) {
+        return isValid;
     }
 
     return true;

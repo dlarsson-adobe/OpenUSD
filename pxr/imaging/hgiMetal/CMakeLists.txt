@@ -7,8 +7,11 @@ if (NOT ${PXR_BUILD_GPU_SUPPORT} OR NOT ${PXR_ENABLE_METAL_SUPPORT})
     return()
 endif()
 
-FIND_LIBRARY(METAL_LIBRARY Metal)
-FIND_LIBRARY(APPUIKIT_LIBRARY AppKit)
+if (PXR_APPLE_EMBEDDED)
+    set(APPLE_UI_FRAMEWORK "UIKit")
+else()
+    set(APPLE_UI_FRAMEWORK "AppKit")
+endif()
 
 pxr_library(hgiMetal
     LIBRARIES
@@ -16,8 +19,9 @@ pxr_library(hgiMetal
         hgi
         tf
         trace
-        ${METAL_LIBRARY}
-        ${APPUIKIT_LIBRARY}
+        "-framework Foundation"
+        "-framework Metal"
+        "-framework ${APPLE_UI_FRAMEWORK}"
 
     PUBLIC_HEADERS
         api.h
@@ -66,4 +70,6 @@ pxr_library(hgiMetal
 
     RESOURCE_FILES
         plugInfo.json
+
+    DISABLE_PRECOMPILED_HEADERS
 )

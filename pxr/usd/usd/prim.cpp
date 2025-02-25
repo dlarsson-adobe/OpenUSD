@@ -1,25 +1,8 @@
 //
 // Copyright 2016 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 #include "pxr/pxr.h"
 #include "pxr/usd/usd/prim.h"
@@ -1619,16 +1602,19 @@ struct UsdPrim_TargetFinder
     using Predicate = std::function<bool (PropertyType const &)>;
     
     static SdfPathVector
-    Find(UsdPrim const &prim, Predicate const &pred, bool recurse) {
-        UsdPrim_TargetFinder tf(prim, pred, recurse);
+    Find(UsdPrim const &prim, Usd_PrimFlagsPredicate const &traversal,
+         Predicate const &pred, bool recurse) {
+        UsdPrim_TargetFinder tf(prim, traversal, pred, recurse);
         tf._Find();
         return std::move(tf._result);
     }
 
 private:
     explicit UsdPrim_TargetFinder(
-        UsdPrim const &prim, Predicate const &pred, bool recurse)
+        UsdPrim const &prim, Usd_PrimFlagsPredicate const &traversal,
+        Predicate const &pred, bool recurse)
         : _prim(prim)
+        , _traversal(traversal)
         , _consumerTask(_dispatcher, [this]() { _ConsumerTask(); })
         , _predicate(pred)
         , _recurse(recurse) {}
@@ -1681,7 +1667,7 @@ private:
 
     void _VisitSubtree(UsdPrim const &prim) {
         _VisitPrim(prim);
-        auto range = prim.GetDescendants();
+        auto range = prim.GetFilteredDescendants(_traversal);
         WorkParallelForEach(range.begin(), range.end(),
                             [this](UsdPrim const &desc) { _VisitPrim(desc); });
     }
@@ -1707,6 +1693,7 @@ private:
     }
 
     UsdPrim _prim;
+    Usd_PrimFlagsPredicate _traversal;
     WorkDispatcher _dispatcher;
     WorkSingularTask _consumerTask;
     Predicate const &_predicate;
@@ -1737,19 +1724,41 @@ struct UsdPrim_AttrConnectionFinder
 USD_API
 SdfPathVector
 UsdPrim::FindAllAttributeConnectionPaths(
+    Usd_PrimFlagsPredicate const &traversal,
     std::function<bool (UsdAttribute const &)> const &predicate,
     bool recurseOnSources) const
 {
     return UsdPrim_AttrConnectionFinder
-        ::Find(*this, predicate, recurseOnSources);
+        ::Find(*this, traversal, predicate, recurseOnSources);
+}
+
+USD_API
+SdfPathVector
+UsdPrim::FindAllAttributeConnectionPaths(
+    std::function<bool (UsdAttribute const &)> const &predicate,
+    bool recurseOnSources) const
+{
+    return FindAllAttributeConnectionPaths(
+        UsdPrimDefaultPredicate, predicate, recurseOnSources);
 }
     
+SdfPathVector
+UsdPrim::FindAllRelationshipTargetPaths(
+    Usd_PrimFlagsPredicate const &traversal,
+    std::function<bool (UsdRelationship const &)> const &predicate,
+    bool recurseOnTargets) const
+{
+    return UsdPrim_RelTargetFinder::Find(
+        *this, traversal, predicate, recurseOnTargets);
+}
+
 SdfPathVector
 UsdPrim::FindAllRelationshipTargetPaths(
     std::function<bool (UsdRelationship const &)> const &predicate,
     bool recurseOnTargets) const
 {
-    return UsdPrim_RelTargetFinder::Find(*this, predicate, recurseOnTargets);
+    return FindAllRelationshipTargetPaths(
+        UsdPrimDefaultPredicate, predicate, recurseOnTargets);
 }
 
 bool

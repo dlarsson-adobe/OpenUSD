@@ -1,25 +1,8 @@
 //
 // Copyright 2022 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 #include "pxr/imaging/hd/dependencyForwardingSceneIndex.h"
 #include "pxr/imaging/hd/dependenciesSchema.h"
@@ -86,7 +69,8 @@ HdDependencyForwardingSceneIndex::_PrimsRemoved(
         _ClearDependencies(primPath);
 
         // If this prim is depended on, flag its map of affected paths/locators
-        // for deletion. Also, send a dirty notice for each affected entry.
+        // for deletion. Also, send a dirty notice for each affected entry,
+        // filtering out self-dependencies.
         // Note: The affected path/locator isn't notified explicitly of this 
         //       prim's removal. It needs to query the scene index and handle
         //       the absence of the prim to detect the removal.
@@ -101,6 +85,11 @@ HdDependencyForwardingSceneIndex::_PrimsRemoved(
                 affectedPair.second.flaggedForDeletion = true;
 
                 const SdfPath &affectedPrimPath = affectedPair.first;
+
+                // Filter out self-dependencies.
+                if (affectedPrimPath == primPath) {
+                    continue;
+                }
 
                 for (const auto &keyEntryPair :
                         affectedPair.second.locatorsEntryMap) {
@@ -153,32 +142,35 @@ HdDependencyForwardingSceneIndex::_PrimDirtied(
     _VisitedNodeSet *visited,
     HdSceneIndexObserver::DirtiedPrimEntries *moreDirtiedEntries)
 {
-    if (TF_VERIFY(visited)) {
-        _VisitedNode node = {primPath, sourceLocator};
-
-        if (visited->find(node) != visited->end()) {
-            return;
-        }
-
-        visited->insert(node);
+    if (!TF_VERIFY(visited)) {
+        return;
     }
 
-    moreDirtiedEntries->emplace_back(primPath, sourceLocator);
+    _VisitedNode node = {primPath, sourceLocator};
+    if (visited->find(node) != visited->end()) {
+        return;
+    }
 
-    // check to see if dependencies are dirty and should be recomputed
+    // don't add to visited set yet to simplify handling of dependencies below.
+
+
+    // check to see if dependencies are dirty and should be recomputed.
+    // we want to do this just once for a prim, so we insert an additional 
+    // node with the dependencies locator to the visited set to track this.
     const HdDataSourceLocator &depsLoc =
             HdDependenciesSchema::GetDefaultLocator();
     if (sourceLocator.Intersects(depsLoc)) {
-        if (TF_VERIFY(visited)) {
-            _VisitedNode dependenciesNode = {primPath, depsLoc};
-            if (visited->find(dependenciesNode) == visited->end()) {
-                visited->insert(dependenciesNode);
-                _ClearDependencies(primPath);
-                _UpdateDependencies(primPath);
-            }
+        const _VisitedNode dependenciesNode = {primPath, depsLoc};
+
+        if (visited->find(dependenciesNode) == visited->end()) {
+            visited->insert(dependenciesNode);
+            _ClearDependencies(primPath);
+            _UpdateDependencies(primPath);
         }
     }
 
+    visited->insert(node);
+    moreDirtiedEntries->emplace_back(primPath, sourceLocator);
 
     // check me in the reverse update table
     // now dirty any dependencies
@@ -211,7 +203,7 @@ HdDependencyForwardingSceneIndex::_PrimDirtied(
 void 
 HdDependencyForwardingSceneIndex::_ClearDependencies(const SdfPath &primPath)
 {
-    _AffectedPrimToDependsOnPathsEntryMap::const_iterator it =
+    _AffectedPrimToDependsOnPathsEntryMap::iterator it =
         _affectedPrimToDependsOnPathsMap.find(primPath);
     if (it == _affectedPrimToDependsOnPathsMap.end()) {
         return;

@@ -1,25 +1,8 @@
 //
 // Copyright 2020 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 
 #include "pxr/pxr.h"
 #include "pxr/usd/ar/asset.h"
@@ -49,6 +32,7 @@
 #include "pxr/base/tf/stl.h"
 #include "pxr/base/tf/stringUtils.h"
 #include "pxr/base/tf/type.h"
+#include "pxr/base/tf/unicodeUtils.h"
 
 #include <tbb/concurrent_hash_map.h>
 
@@ -86,12 +70,6 @@ TF_DEFINE_ENV_SETTING(
 TF_DEFINE_ENV_SETTING(
     PXR_AR_DISABLE_PLUGIN_URI_RESOLVERS, false,
     "Disables plugin URI/IRI resolver implementations.");
-
-TF_DEFINE_ENV_SETTING(
-    PXR_AR_DISABLE_STRICT_SCHEME_VALIDATION, false,
-    "Disables strict validation for URI/IRI schemes. In future releases, "
-    "strict validation will be enforced."
-);
 
 static TfStaticData<std::string> _preferredResolver;
 
@@ -139,14 +117,14 @@ public:
 // with an ASCII alpha character, followed by any number of ASCII alphanumeric
 // or the hyphen, period, and plus characters.
 std::pair<bool, std::string>
-_ValidateResourceIdentifierScheme(const std::string& caseFoldedScheme) {
+_ValidateResourceIdentifierScheme(const std::string_view& caseFoldedScheme) {
     if (caseFoldedScheme.empty()) {
         return std::make_pair(false, "Scheme cannot be empty");
     }
-    if (caseFoldedScheme[0] > 'z' || caseFoldedScheme[0] < 'a') {
+    if (caseFoldedScheme.front() > 'z' || caseFoldedScheme.front() < 'a') {
         return std::make_pair(false, "Scheme must start with ASCII 'a-z'");
     }
-    const auto it = std::find_if(caseFoldedScheme.begin() + 1,
+    const auto it = std::find_if(std::next(caseFoldedScheme.begin()),
                                  caseFoldedScheme.end(),
                                  [](const char c) {
         return !((c >= '0' && c <= '9') ||
@@ -154,21 +132,14 @@ _ValidateResourceIdentifierScheme(const std::string& caseFoldedScheme) {
                  (c == '-') || (c== '.') || (c=='+'));
     });
     if (it != caseFoldedScheme.end()) {
-        if ((((*it) & (1<<7)) == 0)) {
-            // TODO: Once the UTF-8 character iterator lands, it would be
-            // helpful to include the invalid UTF-8 character in the error
-            // message output. As invalid UTF-8 characters may span multiple
-            // bytes, it can't be trivially identified by the character
-            // iterator.
-            return std::make_pair(
-                false, "Non-ASCII UTF-8 characters not allowed in scheme");
-        }
-        else {
-            return std::make_pair(
--               false, TfStringPrintf("Character '%c' not allowed in scheme. "
-                                      "Must be ASCII 'a-z', '-', '+', or '.'",
-                                      *it));
-        }
+        TfUtf8CodePointIterator codePointIt(it, caseFoldedScheme.end());
+        return std::make_pair(
+            false,
+            TfStringPrintf(
+                "'%s' not allowed in scheme. "
+                "Characters must be ASCII 'a-z', '-', '+', or '.'",
+                TfStringify(TfUtf8CodePoint{*codePointIt}).c_str())
+        );
     }
     return std::make_pair(true, "");
 }
@@ -486,6 +457,20 @@ public:
     ArResolver& GetPrimaryResolver()
     {
         return *_resolver->Get();
+    }
+
+    std::vector<std::string> GetURISchemes() const
+    {
+        std::vector<std::string> uriSchemes;
+        uriSchemes.reserve(_uriResolvers.size());
+
+        for (const auto& [scheme, _] : _uriResolvers) {
+            uriSchemes.emplace_back(scheme);
+        }
+
+        std::sort(uriSchemes.begin(), uriSchemes.end());
+
+        return uriSchemes;
     }
 
     const ArResolverContext* GetInternallyManagedCurrentContext() const
@@ -1159,7 +1144,7 @@ private:
                 // Per RFC 3986 sec 3.1 / RFC 3987 sec 5.3.2.1 schemes are
                 // case-insensitive. Force all schemes to lower-case to support
                 // this.
-                uriScheme = TfStringToLower(uriScheme);
+                uriScheme = TfStringToLowerAscii(uriScheme);
 
                 if (const _ResolverSharedPtr* existingResolver =
                     TfMapLookupPtr(uriResolvers, uriScheme)) {
@@ -1170,32 +1155,19 @@ private:
                         uriScheme.c_str(), 
                         (*existingResolver)->GetType().GetTypeName().c_str());
                 }
+                else if (const auto validation =
+                            _ValidateResourceIdentifierScheme(uriScheme);
+                         !validation.first) {
+                    TF_WARN(
+                        "ArGetResolver(): '%s' for '%s' is not a valid "
+                        "resource identifier scheme: %s. Paths with this "
+                        "prefix will be handled by other resolvers.",
+                        uriScheme.c_str(),
+                        resolverInfo.type.GetTypeName().c_str(),
+                        validation.second.c_str());
+                }
                 else {
-                    const auto validation =
-                        _ValidateResourceIdentifierScheme(uriScheme);
-                    if (validation.first) {
-                        uriSchemes.push_back(uriScheme);
-                    }
-                    else if (TfGetEnvSetting(
-                                PXR_AR_DISABLE_STRICT_SCHEME_VALIDATION)){
-                        uriSchemes.push_back(uriScheme);
-                        TF_WARN("'%s' for '%s' is not a valid "
-                                "resource identifier scheme and "
-                                "will be restricted in future releases: %s",
-                                 uriScheme.c_str(),
-                                 resolverInfo.type.GetTypeName().c_str(),
-                                 validation.second.c_str());
-                    } else{
-                        TF_WARN(
-                            "'%s' for '%s' is not a valid resource identifier "
-                            "scheme: %s. Paths with this prefix will be "
-                            "handled by other resolvers. Set "
-                            "PXR_AR_DISABLE_STRICT_SCHEME_VALIDATION to "
-                            "disable strict scheme validation.",
-                            uriScheme.c_str(),
-                            resolverInfo.type.GetTypeName().c_str(),
-                            validation.second.c_str());
-                    }
+                    uriSchemes.push_back(uriScheme);
                 }
             }
 
@@ -1339,7 +1311,7 @@ private:
         // stored in lower-case, so convert our candidate scheme to lower case
         // as well.
         const _ResolverSharedPtr* uriResolver = 
-            TfMapLookupPtr(_uriResolvers, TfStringToLower(scheme));
+            TfMapLookupPtr(_uriResolvers, TfStringToLowerAscii(scheme));
         if (uriResolver) {
             if (info) { 
                 *info = &((*uriResolver)->info);
@@ -1802,6 +1774,14 @@ ArResolver&
 ArGetResolver()
 {
     return _GetResolver();
+}
+
+const std::vector<std::string>& 
+ArGetRegisteredURISchemes()
+{
+    static const std::vector<std::string> uriSchemes = 
+        _GetResolver().GetURISchemes();
+    return uriSchemes;
 }
 
 ArResolver&

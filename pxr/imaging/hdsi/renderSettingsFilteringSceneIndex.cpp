@@ -1,25 +1,8 @@
 //
 // Copyright 2023 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 #include "pxr/imaging/hdsi/renderSettingsFilteringSceneIndex.h"
 
@@ -41,13 +24,15 @@ TF_DEFINE_PUBLIC_TOKENS(HdsiRenderSettingsFilteringSceneIndexTokens,
 TF_DEFINE_PRIVATE_TOKENS(
     _tokens,
     (active_depOn_sceneGlobals_arsp)
+    (active_depOn_sceneGlobals_frame)
 );
 
 namespace
 {
 
 static const SdfPath s_renderScope("/Render");
-static const SdfPath s_fallbackPath("/Render/_FallbackSettings");
+static const SdfPath s_fallbackPath(
+    "/Render/__HdsiRenderSettingsFilteringSceneIndex__FallbackSettings");
 
 // Builds and returns a data source to invalidate the renderSettings.active
 // locator when the sceneGlobals.activeRenderSettingsPrim locator is dirtied.
@@ -74,9 +59,33 @@ _BuildDependencyForActiveLocator()
     return renderSettingsDepDS;
 }
 
+// Builds and returns a data source to invalidate the renderSettings.frame
+// locator when the sceneGlobals.currentFrame locator is dirtied.
+//
+HdContainerDataSourceHandle
+_BuildDependencyForFrameLocator()
+{
+    static const HdRetainedContainerDataSourceHandle rsFrameDepDS =
+        HdRetainedContainerDataSource::New(
+            _tokens->active_depOn_sceneGlobals_frame,
+            HdDependencySchema::Builder()
+            .SetDependedOnPrimPath(
+                HdRetainedTypedSampledDataSource<SdfPath>::New(
+                    HdSceneGlobalsSchema::GetDefaultPrimPath()))
+            .SetDependedOnDataSourceLocator(
+                HdRetainedTypedSampledDataSource<HdDataSourceLocator>::New(
+                    HdSceneGlobalsSchema::GetCurrentFrameLocator()))
+            .SetAffectedDataSourceLocator(
+                HdRetainedTypedSampledDataSource<HdDataSourceLocator>::New(
+                    HdRenderSettingsSchema::GetFrameLocator()))
+            .Build()
+        );
+    return rsFrameDepDS;
+}
+
 // Builds and returns a data source to:
 // (a) invalidate the renderSettings.shutterInterval locator when a targeted 
-// camera's shutterOpen or shutterClose locator is dirtied.
+//     camera's shutterOpen or shutterClose locator is dirtied.
 // (b) invalidate the renderSettings.shutterInterval locator when the
 //     renderProducts locator is dirtied. Due to flattening, we can't limit
 //     this to just the cameraPrim
@@ -226,18 +235,13 @@ _Contains(
 // prim.
 SdfPathVector
 _GetTargetedCameras(
-    HdRenderProductVectorSchema products)
+    HdRenderProductVectorSchema productsSchema)
 {
-    const HdVectorDataSourceHandle vds = products.GetVector();
-    if (!vds) {
-        return SdfPathVector();
-    }
+    const size_t n = productsSchema.GetNumElements();
 
     SdfPathVector cameraPaths;
-    for (size_t ii = 0; ii < vds->GetNumElements(); ++ii) {
-        HdRenderProductSchema productSchema(
-            HdContainerDataSource::Cast(vds->GetElement(ii)));
-        
+    for (size_t i = 0; i < n; ++i) {
+        HdRenderProductSchema productSchema = productsSchema.GetElement(i);
         const HdPathDataSourceHandle camPathDs =  productSchema.GetCameraPrim();
         if (camPathDs) {
             const SdfPath camPath = camPathDs->GetTypedValue(0.0);
@@ -289,18 +293,13 @@ using _ProductShutterInfoVec = std::vector<_ProductShutterInfo>;
 
 _ProductShutterInfoVec
 _GetShutterInfoFromProducts(
-    HdRenderProductVectorSchema products)
+    HdRenderProductVectorSchema productsSchema)
 {
-    const HdVectorDataSourceHandle vds = products.GetVector();
-    if (!vds) {
-        return _ProductShutterInfoVec();
-    }
+    const size_t n = productsSchema.GetNumElements();
 
     _ProductShutterInfoVec result;
-    for (size_t ii = 0; ii < vds->GetNumElements(); ++ii) {
-        HdRenderProductSchema productSchema(
-            HdContainerDataSource::Cast(vds->GetElement(ii)));
-        
+    for (size_t i = 0; i < n; ++i) {
+        HdRenderProductSchema productSchema = productsSchema.GetElement(i);
         const HdPathDataSourceHandle camPathDs =  productSchema.GetCameraPrim();
         if (camPathDs) {
             const SdfPath camPath = camPathDs->GetTypedValue(0.0);
@@ -359,17 +358,20 @@ HdContainerDataSourceHandle
 _BuildOverlayContainerDataSource(
     const HdContainerDataSourceHandle &src1,
     const HdContainerDataSourceHandle &src2,
-    const HdContainerDataSourceHandle &src3)
+    const HdContainerDataSourceHandle &src3,
+    const HdContainerDataSourceHandle &src4)
 {
     return
         HdOverlayContainerDataSource::OverlayedContainerDataSources(
             src1,
             HdOverlayContainerDataSource::OverlayedContainerDataSources(
-                src2, src3));
+                src2, 
+                HdOverlayContainerDataSource::OverlayedContainerDataSources(
+                    src3, src4)));
 }
 
 // Data source override for the 'renderSettings' locator.
-// Adds support for the 'active' and 'shutterInterval' fields and filters
+// Adds support for the 'active' and 'shutterInterval' fields and filtered
 // entries in the 'namespacedSettings' container.
 //
 class _RenderSettingsDataSource final : public HdContainerDataSource
@@ -404,8 +406,7 @@ public:
         if (name == HdRenderSettingsSchemaTokens->active) {
             bool isActive = false;
             SdfPath activePath;
-            if (HdUtils::HasActiveRenderSettingsPrim(
-                    _si, &activePath)) {
+            if (HdUtils::HasActiveRenderSettingsPrim(_si, &activePath)) {
                 isActive = (activePath == _primPath);
             }
             return HdRetainedTypedSampledDataSource<bool>::New(isActive);
@@ -489,6 +490,7 @@ public:
                 _BuildOverlayContainerDataSource(
                     _BuildDependencyForActiveLocator(),
                     _BuildDependenciesForShutterInterval(cameraPaths),
+                    _BuildDependencyForFrameLocator(),
                     HdContainerDataSource::Cast(result));
         }
 
@@ -580,17 +582,24 @@ SdfPathVector
 HdsiRenderSettingsFilteringSceneIndex::GetChildPrimPaths(
     const SdfPath &primPath) const
 { 
-    // Avoid a copy if possible.
+    // Avoid a copy if possible in the generic case.
     if (ARCH_UNLIKELY(
-            (primPath == GetRenderScope() || primPath.IsAbsoluteRootPath()) &&
-             _addedFallbackPrim)) {
+            primPath.IsAbsoluteRootPath() && _addedFallbackPrim)) {
         
         SdfPathVector paths =
             _GetInputSceneIndex()->GetChildPrimPaths(primPath);
-        paths.push_back(primPath.IsAbsoluteRootPath()
-                        ? GetRenderScope()
-                        : GetFallbackPrimPath());
+        if (!_Contains(paths, GetRenderScope())) {
+            paths.push_back(GetRenderScope());
+        }
+        return paths;
+    }
 
+    if (ARCH_UNLIKELY(
+            primPath == GetRenderScope() && _addedFallbackPrim)) {
+        
+        SdfPathVector paths =
+            _GetInputSceneIndex()->GetChildPrimPaths(primPath);
+        paths.push_back(GetFallbackPrimPath());
         return paths;
     }
 

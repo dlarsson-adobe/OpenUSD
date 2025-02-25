@@ -1,25 +1,8 @@
 //
 // Copyright 2023 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 #ifndef PXR_USD_USD_UTILS_USDZ_PACKAGE_H
 #define PXR_USD_USD_UTILS_USDZ_PACKAGE_H
@@ -47,6 +30,23 @@ class SdfAssetPath;
 /// You can optionally specify a different package-internal name for the first
 /// layer of the asset by specifying \p firstLayerName. By default,
 /// \p firstLayerName is empty, meaning that the original name is preserved.
+///
+/// The \p editLayersInPlace parameter controls the strategy used for managing 
+/// changes to layers (including the root layer and all transitive layer 
+/// dependencies) that occur during the package creation process.  When 
+/// \p editLayersInPlace is false, a temporary, anonymous copy of each 
+/// modified layer is created and written into the package. This has the 
+/// advantage of leaving source layers untouched at the expense of creating a 
+/// copy of each modified layer in memory for the duration of this function.
+///
+/// When \p editLayersInPlace is set to true, layers are modified in-place and 
+/// not reverted or persisted once the package has been created. In this case, 
+/// there is no overhead of creating copies of each modified layer.  If you have
+/// UsdStages open during the function call that reference the layers being 
+/// modified, you may receive warnings or composition errors.  While these 
+/// errors will not affect the resulting package adversely, it is strongly 
+/// recommended that this function is run in isolation after any source 
+/// UsdStages have been closed.
 /// 
 /// Returns true if the package was created successfully.
 /// 
@@ -59,23 +59,14 @@ class SdfAssetPath;
 /// reference to a directory path), the dependency is ignored and the contents 
 /// of the directory are not included in the created package. 
 /// 
-/// \note This function modifies the layers referenced by \p assetPath 
-/// (including the root layer and all transitive layer dependencies) in-place. 
-/// However, it does not save the layers before copying them into the package 
-/// that is created. It also does not revert the changes it makes to the 
-/// layers. Therefore, it is strongly recommended that you run this function in 
-/// isolation after any source UsdStages have been closed. If you have UsdStages 
-/// open during the function call that reference the layers being modified, you 
-/// may receive warnings or composition errors which may not affect the 
-/// resulting package adversely.
-/// 
 /// \sa UsdUtilsCreateNewARKitUsdzPackage()
 USDUTILS_API
 bool
 UsdUtilsCreateNewUsdzPackage(
     const SdfAssetPath& assetPath,
     const std::string& usdzFilePath,
-    const std::string& firstLayerName=std::string());
+    const std::string& firstLayerName=std::string(),
+    bool editLayersInPlace = false);
 
 /// Similar to UsdUtilsCreateNewUsdzPackage, this function packages all of the 
 /// dependencies of the given asset. Assets targeted at the initial usdz 
@@ -88,6 +79,23 @@ UsdUtilsCreateNewUsdzPackage(
 ///
 /// If \p firstLayerName is specified, it is modified to have the ".usdc" 
 /// extension, as required by the initial usdz implementation in ARKit.
+///
+/// The \p editLayersInPlace parameter controls the strategy used for managing 
+/// changes to layers (including the root layer and all transitive layer 
+/// dependencies) that occur during the package creation process.  When 
+/// \p editLayersInPlace is false, a temporary, anonymous copy of each 
+/// modified layer is created and written into the package. This has the 
+/// advantage of leaving source layers untouched at the expense of creating a 
+/// copy of each modified layer in memory for the duration of this function.
+///
+/// When \p editLayersInPlace is set to true, layers are modified in-place and 
+/// not reverted or persisted once the package has been created. In this case, 
+/// there is no overhead of creating copies of each modified layer.  If you have
+/// UsdStages open during the function call that reference the layers being 
+/// modified, you may receive warnings or composition errors.  While these 
+/// errors will not affect the resulting package adversely, it is strongly 
+/// recommended that this function is run in isolation after any source 
+/// UsdStages have been closed.
 /// 
 /// Returns true if the package was created successfully.
 /// 
@@ -100,23 +108,14 @@ UsdUtilsCreateNewUsdzPackage(
 /// reference to a directory path), the dependency is ignored and the contents 
 /// of the directory are not included in the created package. 
 /// 
-/// \note This function modifies the layers referenced by \p assetPath 
-/// (including the root layer and all transitive layer dependencies) in-place. 
-/// However, it does not save the layers before copying them into the package 
-/// that is created. It also does not revert the changes it makes to the 
-/// layers. Therefore, it is strongly recommended that you run this function in 
-/// isolation after any source UsdStages have been closed. If you have UsdStages 
-/// open during the function call that reference the layers being modified, you 
-/// may receive warnings or composition errors which may not affect the 
-/// resulting package adversely.  
-/// 
 /// \sa UsdUtilsCreateNewUsdzPackage()
 USDUTILS_API
 bool
 UsdUtilsCreateNewARKitUsdzPackage(
     const SdfAssetPath &assetPath,
     const std::string &usdzFilePath,
-    const std::string &firstLayerName=std::string());
+    const std::string &firstLayerName=std::string(),
+    bool editLayersInplace = false);
 
 PXR_NAMESPACE_CLOSE_SCOPE
 

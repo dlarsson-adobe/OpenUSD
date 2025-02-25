@@ -1,25 +1,8 @@
 //
 // Copyright 2016 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 #ifndef PXR_USD_USD_PRIM_H
 #define PXR_USD_USD_PRIM_H
@@ -109,7 +92,7 @@ class UsdPrimSubtreeRange;
 /// optionally making use of the \ref primFlags.h "prim predicates facility" 
 /// (GetChildren(), GetAllChildren(), GetFilteredChildren()).
 ///
-/// \section Lifetime Management
+/// \section UsdPrim_Lifetime_Management Lifetime Management
 ///
 /// Clients acquire UsdPrim objects, which act like weak/guarded pointers
 /// to persistent objects owned and managed by their originating UsdStage.
@@ -1754,11 +1737,22 @@ public:
     USD_API
     bool HasAttribute(const TfToken& attrName) const;
 
-    /// Search the prim subtree rooted at this prim for attributes for which
-    /// \p predicate returns true, collect their connection source paths and
-    /// return them in an arbitrary order.  If \p recurseOnSources is true,
-    /// act as if this function was invoked on the connected prims and owning
-    /// prims of connected properties also and return the union.
+    /// Search the prim subtree rooted at this prim according to \p
+    /// traversalPredicate for attributes for which \p predicate returns true,
+    /// collect their connection source paths and return them in an arbitrary
+    /// order.  If \p recurseOnSources is true, act as if this function was
+    /// invoked on the connected prims and owning prims of connected properties
+    /// also and return the union.
+    USD_API
+    SdfPathVector
+    FindAllAttributeConnectionPaths(
+        Usd_PrimFlagsPredicate const &traversalPredicate,
+        std::function<bool (UsdAttribute const &)> const &pred = nullptr,
+        bool recurseOnSources = false) const;
+
+    /// \overload
+    /// Invoke FindAllAttributeConnectionPaths() with the
+    /// UsdPrimDefaultPredicate as its traversalPredicate.
     USD_API
     SdfPathVector
     FindAllAttributeConnectionPaths(
@@ -1847,12 +1841,22 @@ public:
     USD_API
     bool HasRelationship(const TfToken& relName) const;
 
-    /// Search the prim subtree rooted at this prim for relationships for which
-    /// \p predicate returns true, collect their target paths and return them in
-    /// an arbitrary order.  If \p recurseOnTargets is true, act as if this
-    /// function was invoked on the targeted prims and owning prims of targeted
-    /// properties also (but not of forwarding relationships) and return the
-    /// union.
+    /// Search the prim subtree rooted at this prim according to \p
+    /// traversalPredicate for relationships for which \p predicate returns
+    /// true, collect their target paths and return them in an arbitrary order.
+    /// If \p recurseOnTargets is true, act as if this function was invoked on
+    /// the targeted prims and owning prims of targeted properties also (but not
+    /// of forwarding relationships) and return the union.
+    USD_API
+    SdfPathVector
+    FindAllRelationshipTargetPaths(
+        Usd_PrimFlagsPredicate const &traversalPredicate,
+        std::function<bool (UsdRelationship const &)> const &pred = nullptr,
+        bool recurseOnTargets = false) const;
+
+    /// \overload
+    /// Invoke FindAllRelationshipTargetPaths() with the UsdPrimDefaultPredicate
+    /// as its traversalPredicate.
     USD_API
     SdfPathVector
     FindAllRelationshipTargetPaths(
@@ -2192,10 +2196,10 @@ private:
     friend class UsdSchemaBase;
     friend class UsdAPISchemaBase;
     friend class UsdStage;
-    friend class Usd_StageImplAccess;
     friend class UsdPrimRange;
     friend class Usd_PrimData;
     friend class Usd_PrimFlagsPredicate;
+    friend struct Usd_StageImplAccess;
     friend struct UsdPrim_RelTargetFinder;
     friend struct UsdPrim_AttrConnectionFinder;
 

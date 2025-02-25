@@ -14,6 +14,7 @@ pxr_library(hd
         cameraUtil
         hf
         pxOsd
+        sdr
         ${TBB_tbb_LIBRARY}
 
     INCLUDE_DIRS
@@ -35,9 +36,14 @@ pxr_library(hd
         capsuleSchema
         categoriesSchema
         changeTracker
+        collectionExpressionEvaluator
+        collectionPredicateLibrary
+        collectionSchema
+        collectionsSchema
         command
         coneSchema
         containerDataSourceEditor
+        containerSchema
         coordSys
         coordSysSchema
         coordSysBindingSchema
@@ -46,6 +52,7 @@ pxr_library(hd
         dataSource
         dataSourceHash
         dataSourceLegacyPrim
+        dataSourceLegacyTaskPrim
         dataSourceLocator
         dataSourceMaterialNetworkInterface
         debugCodes
@@ -62,6 +69,7 @@ pxr_library(hd
         extComputation
         extComputationContext
         extComputationContextInternal
+        extComputationCpuCallback
         extComputationInputComputationSchema
         extComputationOutputSchema
         extComputationPrimvarSchema
@@ -74,7 +82,6 @@ pxr_library(hd
         flattenedDataSourceProvider
         flattenedDataSourceProviders
         flattenedOverlayDataSourceProvider
-        flattenedMaterialBindingsDataSourceProvider
         flattenedPrimvarsDataSourceProvider
         flattenedPurposeDataSourceProvider
         flattenedVisibilityDataSourceProvider
@@ -83,7 +90,6 @@ pxr_library(hd
         flatNormals
         geomSubset
         geomSubsetSchema
-        geomSubsetsSchema
         imageShader
         imageShaderSchema
         instanceCategoriesSchema
@@ -96,7 +102,10 @@ pxr_library(hd
         integratorSchema
         lazyContainerDataSource
         legacyDisplayStyleSchema
+        legacyGeomSubsetSceneIndex
         legacyPrimSceneIndex
+        legacyTaskFactory
+        legacyTaskSchema
         lensDistortionSchema
         light
         lightSchema
@@ -106,9 +115,12 @@ pxr_library(hd
         materialBindingsSchema
         materialConnectionSchema
         materialFilteringSceneIndexBase
+        materialInterfaceMappingSchema
         materialNetworkSchema
         materialNetwork2Interface
         materialNodeSchema
+        materialNodeParameterSchema
+        materialOverrideSchema
         materialSchema
         mergingSceneIndex
         mesh
@@ -122,6 +134,7 @@ pxr_library(hd
         nurbsPatchTrimCurveSchema
         overlayContainerDataSource
         perfLog
+        planeSchema
         pluginRenderDelegateUniqueHandle
         points
         prefixingSceneIndex
@@ -134,12 +147,14 @@ pxr_library(hd
         purposeSchema
         renderBuffer
         renderBufferSchema
+        renderCapabilitiesSchema
         renderDelegate
         rendererPlugin
         rendererPluginHandle
         rendererPluginRegistry
         renderIndex
         renderPass
+        renderPassSchema
         renderPassState
         renderProductSchema
         renderSettings
@@ -162,6 +177,7 @@ pxr_library(hd
         sceneIndexPlugin
         sceneIndexPluginRegistry
         sceneIndexPrimView
+        sceneIndexUtil
         schema
         selection
         selectionSchema
@@ -172,8 +188,11 @@ pxr_library(hd
         splitDiopterSchema
         sprim
         subdivisionTagsSchema
+        systemMessages
         systemSchema
         task
+        tetMeshSchema
+        tetMeshTopologySchema
         timeSampleArray
         tokens
         topology
@@ -198,6 +217,7 @@ pxr_library(hd
         driver.h
         invalidatableContainerDataSource.h
         materialNetworkInterface.h
+        schemaTypeDefs.h
         vectorSchemaTypeDefs.h
         version.h
 
@@ -206,10 +226,22 @@ pxr_library(hd
 
     RESOURCE_FILES
         plugInfo.json
+        codegenTemplates/schemaClass.h
+        codegenTemplates/schemaClass.cpp
 
     DOXYGEN_FILES
         overview.dox
 )
+
+if (NOT PXR_ENABLE_PYTHON_SUPPORT)
+    message(STATUS "Skipping building hdGenSchema, Python modules required.")
+elseif (NOT JINJA2_FOUND)
+    message(WARNING "Skipping building hdGenSchema due to missing dependency: Jinja2")
+else()
+    pxr_python_bin(hdGenSchema
+        DEPENDENCIES
+    )
+endif()
 
 pxr_build_test(testHdBufferSourceEmptyVal
    LIBRARIES
@@ -230,15 +262,6 @@ pxr_build_test(testHdBufferSpec
    CPPFILES
        testenv/testHdBufferSpec.cpp
 )
-
-# Removing test from build while we modernize the Hydra architecture.
-# pxr_build_test(testHdChangeTracker
-#    LIBRARIES
-#        hd
-
-#    CPPFILES
-#        testenv/testHdChangeTracker.cpp
-# )
 
 pxr_build_test(testHdCommand
    LIBRARIES
@@ -303,15 +326,6 @@ pxr_build_test(testHdPerfLog
        testenv/testHdPerfLog.cpp
 )
 
-# Removing test from build while we modernize the Hydra architecture.
-# pxr_build_test(testHdRenderIndex
-#    LIBRARIES
-#        hd
-
-#    CPPFILES
-#        testenv/testHdRenderIndex.cpp
-# )
-
 pxr_build_test(testHdDataSource
    LIBRARIES
        hd
@@ -342,6 +356,17 @@ pxr_build_test(testHdSortedIds
        testenv/testHdSortedIds.cpp
 )
 
+pxr_build_test(testHdSortedIdsPerf
+   LIBRARIES
+       hd
+       sdf
+       tf
+       arch
+
+   CPPFILES
+       testenv/testHdSortedIdsPerf.cpp
+)
+
 pxr_build_test(testHdTimeSampleArray
    LIBRARIES
        hd
@@ -358,12 +383,14 @@ pxr_build_test(testHdTypes
        testenv/testHdTypes.cpp
 )
 
-pxr_build_test(testHdInstancerDeprecatedPrimvars
+pxr_build_test(testHdCollectionExpressionEvaluator
     LIBRARIES
         hd
+        tf
+        sdf
         
     CPPFILES
-        testenv/testHdInstancerDeprecatedPrimvars.cpp
+        testenv/testHdCollectionExpressionEvaluator.cpp
 )
 
 pxr_install_test_dir(
@@ -379,10 +406,6 @@ pxr_register_test(testHdBufferSourceEmptyVal
 pxr_register_test(testHdBufferSpec
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdBufferSpec"
 )
-
-# pxr_register_test(testHdChangeTracker
-#     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdChangeTracker"
-# )
 
 pxr_register_test(testHdCommand
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdCommand"
@@ -412,10 +435,6 @@ pxr_register_test(testHdPerfLog
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdPerfLog"
 )
 
-# pxr_register_test(testHdRenderIndex
-#     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdRenderIndex"
-# )
-
 pxr_register_test(testHdDataSource
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdDataSource"
 )
@@ -438,8 +457,6 @@ pxr_register_test(testHdTypes
     COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdTypes"
 )
 
-pxr_register_test(testHdInstancerDeprecatedPrimvars
-    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdInstancerDeprecatedPrimvars"
-    ENV
-        HD_USE_DEPRECATED_INSTANCER_PRIMVAR_NAMES=true
+pxr_register_test(testHdCollectionExpressionEvaluator
+    COMMAND "${CMAKE_INSTALL_PREFIX}/tests/testHdCollectionExpressionEvaluator"
 )

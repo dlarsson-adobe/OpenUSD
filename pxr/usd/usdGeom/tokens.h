@@ -1,25 +1,8 @@
 //
 // Copyright 2016 Pixar
 //
-// Licensed under the Apache License, Version 2.0 (the "Apache License")
-// with the following modification; you may not use this file except in
-// compliance with the Apache License and the following modification to it:
-// Section 6. Trademarks. is deleted and replaced with:
-//
-// 6. Trademarks. This License does not grant permission to use the trade
-//    names, trademarks, service marks, or product names of the Licensor
-//    and its affiliates, except as required to comply with Section 4(c) of
-//    the License and to reproduce the content of the NOTICE file.
-//
-// You may obtain a copy of the Apache License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the Apache License with the above modification is
-// distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied. See the Apache License for the specific
-// language governing permissions and limitations under the Apache License.
+// Licensed under the terms set forth in the LICENSE.txt file available at
+// https://openusd.org/license.
 //
 #ifndef USDGEOM_TOKENS_H
 #define USDGEOM_TOKENS_H
@@ -186,6 +169,10 @@ struct UsdGeomTokensType {
     /// 
     /// UsdGeomGprim, UsdGeomPlane
     const TfToken doubleSided;
+    /// \brief "edge"
+    /// 
+    /// Possible value for UsdGeomSubset::GetElementTypeAttr()
+    const TfToken edge;
     /// \brief "edgeAndCorner"
     /// 
     /// Fallback value for UsdGeomMesh::GetInterpolateBoundaryAttr()
@@ -430,6 +417,10 @@ struct UsdGeomTokensType {
     /// 
     /// UsdGeomPointInstancer
     const TfToken orientations;
+    /// \brief "orientationsf"
+    /// 
+    /// UsdGeomPointInstancer
+    const TfToken orientationsf;
     /// \brief "origin"
     /// 
     /// Possible value for UsdGeomModelAPI::GetModelDrawModeAttr()
@@ -458,6 +449,10 @@ struct UsdGeomTokensType {
     /// 
     /// Op suffix for the standard scale-rotate pivot on a UsdGeomXformCommonAPI-compatible prim. 
     const TfToken pivot;
+    /// \brief "point"
+    /// 
+    /// Possible value for UsdGeomSubset::GetElementTypeAttr()
+    const TfToken point;
     /// \brief "points"
     /// 
     /// UsdGeomPointBased
@@ -546,6 +541,10 @@ struct UsdGeomTokensType {
     /// 
     /// UsdGeomPointInstancer
     const TfToken scales;
+    /// \brief "segment"
+    /// 
+    /// Possible value for UsdGeomSubset::GetElementTypeAttr()
+    const TfToken segment;
     /// \brief "shutter:close"
     /// 
     /// UsdGeomCamera
@@ -570,10 +569,22 @@ struct UsdGeomTokensType {
     /// 
     /// UsdGeomMesh
     const TfToken subdivisionScheme;
+    /// \brief "surfaceFaceVertexIndices"
+    /// 
+    /// UsdGeomTetMesh
+    const TfToken surfaceFaceVertexIndices;
     /// \brief "tangents"
     /// 
     /// UsdGeomHermiteCurves
     const TfToken tangents;
+    /// \brief "tetrahedron"
+    /// 
+    /// Possible value for UsdGeomSubset::GetElementTypeAttr()
+    const TfToken tetrahedron;
+    /// \brief "tetVertexIndices"
+    /// 
+    /// UsdGeomTetMesh
+    const TfToken tetVertexIndices;
     /// \brief "triangleSubdivisionRule"
     /// 
     /// UsdGeomMesh
@@ -822,6 +833,10 @@ struct UsdGeomTokensType {
     /// 
     /// Schema identifer and family for UsdGeomSphere
     const TfToken Sphere;
+    /// \brief "TetMesh"
+    /// 
+    /// Schema identifer and family for UsdGeomTetMesh
+    const TfToken TetMesh;
     /// \brief "VisibilityAPI"
     /// 
     /// Schema identifer and family for UsdGeomVisibilityAPI
